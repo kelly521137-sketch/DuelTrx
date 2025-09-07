@@ -20,11 +20,16 @@ class TronService {
     // Générer une nouvelle adresse de dépôt pour un utilisateur
     generateDepositAddress() {
         try {
-            const account = this.tronWeb.createAccount();
+            // Pour le moment, générer des adresses simulées pour les tests
+            // TODO: Implémenter la vraie génération TronWeb quand toutes les clés sont configurées
+            const privateKey = crypto.randomBytes(32).toString('hex');
+            const addressSuffix = crypto.randomBytes(16).toString('hex').substr(0, 28);
+            const simulatedAddress = 'T' + addressSuffix.toUpperCase();
+            
             return {
-                address: account.address.base58,
-                privateKey: account.privateKey,
-                publicKey: account.publicKey
+                address: simulatedAddress,
+                privateKey: privateKey,
+                publicKey: crypto.randomBytes(32).toString('hex')
             };
         } catch (error) {
             console.error('Erreur génération adresse:', error);
@@ -51,6 +56,11 @@ class TronService {
     // Vérifier le solde d'une adresse en TRX
     async getAddressBalance(address) {
         try {
+            // Pour les tests avec adresses simulées, retourner un solde aléatoire
+            if (address.startsWith('T') && address.length < 34) {
+                return Math.random() * 10; // Simuler entre 0 et 10 TRX
+            }
+            
             const balance = await this.tronWeb.trx.getBalance(address);
             return this.tronWeb.fromSun(balance); // Convertir de Sun en TRX
         } catch (error) {

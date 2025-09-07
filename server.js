@@ -33,7 +33,8 @@ app.use(express.static('public'));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limite à 100 requêtes par fenêtre par IP
+  max: 100, // limite à 100 requêtes par fenêtre par IP
+  trustProxy: false // Fix pour éviter les warnings
 });
 app.use('/api', limiter);
 
