@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progress Race - Jeu de Course Compétitif</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .progress-bar {
+            transition: width 0.1s ease;
+        }
+        .pulse-animation {
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <!-- Navigation -->
+    <nav class="gradient-bg shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center">
+                    <i class="fas fa-trophy text-yellow-400 text-xl mr-2"></i>
+                    <span class="font-bold text-xl">Progress Race</span>
+                </div>
+                <div id="user-nav" class="hidden items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <i class="fas fa-coins text-yellow-400"></i>
+                        <span id="user-balance">0</span>
+                        <span class="text-sm opacity-75">points</span>
+                    </div>
+                    <span id="user-username" class="font-medium"></span>
+                    <button id="profile-btn" class="bg-white bg-opacity-20 px-3 py-1 rounded-md hover:bg-opacity-30 transition">
+                        <i class="fas fa-user"></i>
+                    </button>
+                    <button id="logout-btn" class="bg-red-500 bg-opacity-80 px-3 py-1 rounded-md hover:bg-opacity-100 transition">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+                <div id="guest-nav" class="flex items-center space-x-2">
+                    <button id="login-btn" class="bg-white bg-opacity-20 px-4 py-2 rounded-md hover:bg-opacity-30 transition">
+                        Connexion
+                    </button>
+                    <button id="register-btn" class="bg-blue-600 px-4 py-2 rounded-md hover:bg-blue-700 transition">
+                        S'inscrire
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-4 py-8">
+        <!-- Page d'accueil -->
+        <div id="home-page" class="text-center">
+            <div class="max-w-4xl mx-auto">
+                <h1 class="text-5xl font-bold mb-6 bg-gradient-to-r from-yellow-400 to-red-500 bg-clip-text text-transparent">
+                    Progress Race
+                </h1>
+                <p class="text-xl text-gray-300 mb-8">
+                    Affrontez d'autres joueurs dans une course de rapidité ! 
+                    Misez vos points et gagnez gros !
+                </p>
+                
+                <div class="grid md:grid-cols-3 gap-6 mb-8">
+                    <div class="card p-6 rounded-lg shadow-lg text-gray-800">
+                        <i class="fas fa-lightning-bolt text-3xl text-yellow-500 mb-4"></i>
+                        <h3 class="font-bold text-lg mb-2">Rapide & Intense</h3>
+                        <p class="text-sm">Des parties courtes et intenses qui mettent à l'épreuve votre rapidité</p>
+                    </div>
+                    <div class="card p-6 rounded-lg shadow-lg text-gray-800">
+                        <i class="fas fa-users text-3xl text-blue-500 mb-4"></i>
+                        <h3 class="font-bold text-lg mb-2">1 vs 1</h3>
+                        <p class="text-sm">Affrontement direct avec un autre joueur en temps réel</p>
+                    </div>
+                    <div class="card p-6 rounded-lg shadow-lg text-gray-800">
+                        <i class="fas fa-trophy text-3xl text-green-500 mb-4"></i>
+                        <h3 class="font-bold text-lg mb-2">Gagnez Gros</h3>
+                        <p class="text-sm">Le gagnant remporte 85% du pot total</p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 p-6 rounded-lg mb-8">
+                    <h2 class="text-2xl font-bold mb-4">Comment jouer ?</h2>
+                    <div class="text-left max-w-2xl mx-auto space-y-3">
+                        <div class="flex items-center">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">1</span>
+                            <span>Inscrivez-vous et obtenez 100 points gratuits</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">2</span>
+                            <span>Misez 2 points minimum pour rejoindre une partie</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">3</span>
+                            <span>Cliquez rapidement pour remplir votre barre de progression</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">4</span>
+                            <span>Le premier à 100% remporte 85% du pot !</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="play-btn" class="hidden bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-lg text-xl transition transform hover:scale-105">
+                    <i class="fas fa-play mr-2"></i>
+                    Jouer Maintenant
+                </button>
+            </div>
+        </div>
+
+        <!-- Formulaire de connexion -->
+        <div id="login-page" class="hidden max-w-md mx-auto">
+            <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                <h2 class="text-2xl font-bold text-center mb-6">Connexion</h2>
+                <form id="login-form">
+                    <div class="mb-4">
+                        <label class="block text-sm font-bold mb-2">Email</label>
+                        <input type="email" id="login-email" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-sm font-bold mb-2">Mot de passe</label>
+                        <input type="password" id="login-password" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
+                        Se connecter
+                    </button>
+                </form>
+                <p class="text-center mt-4">
+                    Pas de compte ? 
+                    <button id="switch-to-register" class="text-blue-600 hover:underline">S'inscrire</button>
+                </p>
+            </div>
+        </div>
+
+        <!-- Formulaire d'inscription -->
+        <div id="register-page" class="hidden max-w-md mx-auto">
+            <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                <h2 class="text-2xl font-bold text-center mb-6">S'inscrire</h2>
+                <form id="register-form">
+                    <div class="mb-4">
+                        <label class="block text-sm font-bold mb-2">Email</label>
+                        <input type="email" id="register-email" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-bold mb-2">Nom d'utilisateur</label>
+                        <input type="text" id="register-username" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-sm font-bold mb-2">Mot de passe</label>
+                        <input type="password" id="register-password" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition">
+                        S'inscrire
+                    </button>
+                </form>
+                <p class="text-center mt-4">
+                    Déjà un compte ? 
+                    <button id="switch-to-login" class="text-blue-600 hover:underline">Se connecter</button>
+                </p>
+            </div>
+        </div>
+
+        <!-- Page de profil -->
+        <div id="profile-page" class="hidden max-w-4xl mx-auto">
+            <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                <h2 class="text-2xl font-bold text-center mb-6">Mon Profil</h2>
+                
+                <div class="grid md:grid-cols-2 gap-6 mb-8">
+                    <div class="text-center">
+                        <div class="bg-gradient-to-r from-blue-500 to-purple-600 p-6 rounded-lg text-white">
+                            <i class="fas fa-coins text-3xl mb-2"></i>
+                            <div class="text-2xl font-bold" id="profile-balance">0</div>
+                            <div class="text-sm opacity-75">Points disponibles</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-green-100 p-4 rounded-lg text-center">
+                            <div class="text-2xl font-bold text-green-600" id="profile-wins">0</div>
+                            <div class="text-sm text-green-600">Victoires</div>
+                        </div>
+                        <div class="bg-red-100 p-4 rounded-lg text-center">
+                            <div class="text-2xl font-bold text-red-600" id="profile-losses">0</div>
+                            <div class="text-sm text-red-600">Défaites</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-6 mb-8">
+                    <div>
+                        <h3 class="text-lg font-bold mb-4">Ajouter des points</h3>
+                        <div class="space-y-4">
+                            <input type="number" id="deposit-amount" placeholder="Montant (min 10)" min="10" class="w-full px-3 py-2 border rounded-lg">
+                            <button id="deposit-btn" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition">
+                                <i class="fas fa-plus mr-2"></i>Ajouter des points
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold mb-4">Retirer des points</h3>
+                        <div class="space-y-4">
+                            <input type="number" id="withdraw-amount" placeholder="Montant (min 50)" min="50" class="w-full px-3 py-2 border rounded-lg">
+                            <button id="withdraw-btn" class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition">
+                                <i class="fas fa-minus mr-2"></i>Retirer des points
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-lg font-bold mb-4">Historique des transactions</h3>
+                    <div id="transactions-list" class="space-y-2 max-h-64 overflow-y-auto">
+                        <!-- Les transactions seront chargées ici -->
+                    </div>
+                </div>
+
+                <div class="text-center mt-6">
+                    <button id="back-to-home" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">
+                        <i class="fas fa-home mr-2"></i>Retour à l'accueil
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page de jeu -->
+        <div id="game-page" class="hidden max-w-4xl mx-auto">
+            <!-- File d'attente -->
+            <div id="queue-section" class="text-center">
+                <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                    <div class="pulse-animation">
+                        <i class="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-4">Recherche d'un adversaire...</h2>
+                    <p class="text-gray-600 mb-4">Mise: <span class="font-bold text-blue-600">2 points</span></p>
+                    <p class="text-sm text-gray-500 mb-6">Vous serez automatiquement associé à un autre joueur</p>
+                    <button id="leave-queue-btn" class="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition">
+                        <i class="fas fa-times mr-2"></i>Annuler
+                    </button>
+                </div>
+            </div>
+
+            <!-- Match trouvé -->
+            <div id="match-section" class="hidden text-center">
+                <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                    <h2 class="text-2xl font-bold mb-4">Adversaire trouvé !</h2>
+                    <div class="flex justify-center items-center space-x-4 mb-6">
+                        <div class="text-center">
+                            <div class="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white text-xl font-bold mb-2">
+                                <span id="player1-initial"></span>
+                            </div>
+                            <div id="player1-name" class="font-medium"></div>
+                        </div>
+                        <div class="text-2xl font-bold text-red-500">VS</div>
+                        <div class="text-center">
+                            <div class="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center text-white text-xl font-bold mb-2">
+                                <span id="player2-initial"></span>
+                            </div>
+                            <div id="player2-name" class="font-medium"></div>
+                        </div>
+                    </div>
+                    <p class="text-lg mb-4">Pot total: <span id="pot-amount" class="font-bold text-green-600">4 points</span></p>
+                    <p class="text-sm text-gray-600">La partie commence dans <span id="countdown">3</span> secondes...</p>
+                </div>
+            </div>
+
+            <!-- Jeu en cours -->
+            <div id="race-section" class="hidden">
+                <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                    <h2 class="text-2xl font-bold text-center mb-6">Course en cours !</h2>
+                    
+                    <!-- Barres de progression -->
+                    <div class="space-y-6 mb-8">
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <span id="race-player1-name" class="font-medium"></span>
+                                <span id="player1-progress-text" class="text-sm text-gray-600">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-4">
+                                <div id="player1-progress-bar" class="progress-bar bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <span id="race-player2-name" class="font-medium"></span>
+                                <span id="player2-progress-text" class="text-sm text-gray-600">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-4">
+                                <div id="player2-progress-bar" class="progress-bar bg-red-500 h-4 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Contrôles -->
+                    <div class="text-center">
+                        <button id="click-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-8 px-12 rounded-lg text-2xl transition transform hover:scale-105 active:scale-95">
+                            <i class="fas fa-mouse-pointer mr-2"></i>CLIQUER !
+                        </button>
+                        <p class="text-sm text-gray-600 mt-4">Ou appuyez sur la barre ESPACE</p>
+                        <p class="text-xs text-gray-500 mt-2">Premier à 100% gagne !</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Résultat -->
+            <div id="result-section" class="hidden text-center">
+                <div class="card p-8 rounded-lg shadow-lg text-gray-800">
+                    <div id="win-result" class="hidden">
+                        <i class="fas fa-trophy text-6xl text-yellow-500 mb-4"></i>
+                        <h2 class="text-3xl font-bold text-green-600 mb-4">Victoire !</h2>
+                        <p class="text-lg mb-4">Vous avez gagné <span id="win-amount" class="font-bold text-green-600"></span> points !</p>
+                    </div>
+                    <div id="lose-result" class="hidden">
+                        <i class="fas fa-times-circle text-6xl text-red-500 mb-4"></i>
+                        <h2 class="text-3xl font-bold text-red-600 mb-4">Défaite</h2>
+                        <p class="text-lg mb-4"><span id="winner-name"></span> a gagné cette partie.</p>
+                    </div>
+                    <div class="mt-6 space-x-4">
+                        <button id="play-again-btn" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition">
+                            <i class="fas fa-redo mr-2"></i>Rejouer
+                        </button>
+                        <button id="back-home-btn" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition">
+                            <i class="fas fa-home mr-2"></i>Accueil
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifications -->
+    <div id="notifications" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
