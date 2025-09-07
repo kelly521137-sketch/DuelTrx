@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const TronService = require('./tronService');
 require('dotenv').config();
 
 const app = express();
@@ -24,6 +25,7 @@ const pool = new Pool({
 });
 
 // Middleware
+app.set('trust proxy', true); // Fix pour express-rate-limit
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
@@ -37,6 +39,9 @@ app.use('/api', limiter);
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+// Initialiser le service Tron
+const tronService = new TronService();
 
 // Middleware d'authentification
 const authenticateToken = (req, res, next) => {
@@ -83,16 +88,14 @@ app.post('/api/auth/register', async (req, res) => {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Créer l'utilisateur avec un solde initial de 100 points
-    const newUser = await pool.query(
-      'INSERT INTO users (email, password_hash, username, balance_points) VALUES ($1, $2, $3, $4) RETURNING id, email, username, balance_points',
-      [email, passwordHash, username, 100.0]
-    );
+    // Générer une adresse de dépôt TRX unique
+    const depositAccount = tronService.generateDepositAddress();
+    const encryptedPrivateKey = tronService.encryptPrivateKey(depositAccount.privateKey);
 
-    // Créer une transaction de dépôt initial
-    await pool.query(
-      'INSERT INTO transactions (user_id, type, amount, status) VALUES ($1, $2, $3, $4)',
-      [newUser.rows[0].id, 'deposit', 100.0, 'confirmed']
+    // Créer l'utilisateur avec adresse TRX
+    const newUser = await pool.query(
+      'INSERT INTO users (email, password_hash, username, balance_trx, deposit_address, address_private_key) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, username, balance_trx, deposit_address',
+      [email, passwordHash, username, 0.0, depositAccount.address, encryptedPrivateKey]
     );
 
     const token = jwt.sign({ userId: newUser.rows[0].id }, JWT_SECRET);
@@ -113,7 +116,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
     const user = await pool.query(
-      'SELECT id, email, password_hash, username, balance_points, wins, losses FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, username, balance_trx, deposit_address, wins, losses FROM users WHERE email = $1',
       [email]
     );
 
@@ -135,7 +138,8 @@ app.post('/api/auth/login', async (req, res) => {
         id: user.rows[0].id,
         email: user.rows[0].email,
         username: user.rows[0].username,
-        balance_points: user.rows[0].balance_points,
+        balance_trx: user.rows[0].balance_trx,
+        deposit_address: user.rows[0].deposit_address,
         wins: user.rows[0].wins,
         losses: user.rows[0].losses
       }
@@ -150,7 +154,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/user/me', authenticateToken, async (req, res) => {
   try {
     const user = await pool.query(
-      'SELECT id, email, username, balance_points, wins, losses, created_at FROM users WHERE id = $1',
+      'SELECT id, email, username, balance_trx, deposit_address, wins, losses, created_at FROM users WHERE id = $1',
       [req.user.userId]
     );
 
@@ -179,76 +183,155 @@ app.get('/api/transactions', authenticateToken, async (req, res) => {
   }
 });
 
-// Routes de wallet (simulé)
-app.post('/api/wallet/deposit', authenticateToken, async (req, res) => {
+// Générer une adresse de dépôt pour l'utilisateur
+app.get('/api/wallet/deposit-address', authenticateToken, async (req, res) => {
   try {
-    const { amount } = req.body;
+    const user = await pool.query(
+      'SELECT deposit_address FROM users WHERE id = $1',
+      [req.user.userId]
+    );
 
-    if (!amount || amount < 10) {
-      return res.status(400).json({ error: 'Montant minimum de 10 points' });
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
 
-    // Simuler un dépôt immédiat
-    await pool.query('BEGIN');
-
-    const updatedUser = await pool.query(
-      'UPDATE users SET balance_points = balance_points + $1 WHERE id = $2 RETURNING balance_points',
-      [amount, req.user.userId]
-    );
-
-    await pool.query(
-      'INSERT INTO transactions (user_id, type, amount, status) VALUES ($1, $2, $3, $4)',
-      [req.user.userId, 'deposit', amount, 'confirmed']
-    );
-
-    await pool.query('COMMIT');
-
     res.json({
-      message: 'Dépôt effectué avec succès',
-      newBalance: updatedUser.rows[0].balance_points
+      address: user.rows[0].deposit_address,
+      network: 'TRON (TRX)',
+      minAmount: 2.0,
+      note: 'Envoyez au moins 2 TRX à cette adresse. Les dépôts sont vérifiés automatiquement.'
     });
   } catch (error) {
+    console.error('Erreur récupération adresse dépôt:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Vérifier les dépôts entrants
+app.post('/api/wallet/check-deposits', authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query(
+      'SELECT deposit_address FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+
+    const address = user.rows[0].deposit_address;
+    const balance = await tronService.getAddressBalance(address);
+    
+    if (balance >= 2.0) {
+      // Il y a des fonds - les transférer vers le solde utilisateur
+      await pool.query('BEGIN');
+      
+      const updatedUser = await pool.query(
+        'UPDATE users SET balance_trx = balance_trx + $1 WHERE id = $2 RETURNING balance_trx',
+        [balance, req.user.userId]
+      );
+      
+      await pool.query(
+        'INSERT INTO transactions (user_id, type, amount, trx_amount, tron_address, status) VALUES ($1, $2, $3, $4, $5, $6)',
+        [req.user.userId, 'deposit', balance, balance, address, 'confirmed']
+      );
+      
+      await pool.query('COMMIT');
+      
+      res.json({
+        success: true,
+        amount: balance,
+        newBalance: updatedUser.rows[0].balance_trx,
+        message: `Dépôt de ${balance} TRX confirmé !`
+      });
+    } else {
+      res.json({
+        success: false,
+        balance: balance,
+        message: 'Aucun dépôt détecté ou montant insuffisant'
+      });
+    }
+  } catch (error) {
     await pool.query('ROLLBACK');
-    console.error('Erreur lors du dépôt:', error);
+    console.error('Erreur vérification dépôts:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
 app.post('/api/wallet/withdraw', authenticateToken, async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, address } = req.body;
 
-    if (!amount || amount < 50) {
-      return res.status(400).json({ error: 'Montant minimum de retrait: 50 points' });
+    if (!amount || amount < 5.0) {
+      return res.status(400).json({ error: 'Montant minimum de retrait: 5 TRX' });
+    }
+
+    if (!address || !tronService.isValidAddress(address)) {
+      return res.status(400).json({ error: 'Adresse TRX invalide' });
     }
 
     const user = await pool.query(
-      'SELECT balance_points FROM users WHERE id = $1',
+      'SELECT balance_trx, address_private_key FROM users WHERE id = $1',
       [req.user.userId]
     );
 
-    if (user.rows[0].balance_points < amount) {
+    if (user.rows[0].balance_trx < amount) {
       return res.status(400).json({ error: 'Solde insuffisant' });
+    }
+
+    // Estimer les frais
+    const estimatedFee = await tronService.estimateTransactionFee(
+      user.rows[0].deposit_address, address, amount
+    );
+    
+    const totalNeeded = amount + estimatedFee;
+    if (user.rows[0].balance_trx < totalNeeded) {
+      return res.status(400).json({ 
+        error: `Solde insuffisant pour couvrir les frais. Nécessaire: ${totalNeeded} TRX (${amount} + ${estimatedFee} frais)` 
+      });
     }
 
     await pool.query('BEGIN');
 
-    const updatedUser = await pool.query(
-      'UPDATE users SET balance_points = balance_points - $1 WHERE id = $2 RETURNING balance_points',
-      [amount, req.user.userId]
-    );
+    try {
+      // Déchiffrer la clé privée
+      const privateKey = tronService.decryptPrivateKey(user.rows[0].address_private_key);
+      
+      // Envoyer la transaction
+      const result = await tronService.sendTRX(privateKey, address, amount);
+      
+      if (!result.success) {
+        await pool.query('ROLLBACK');
+        return res.status(400).json({ error: result.error });
+      }
 
-    await pool.query(
-      'INSERT INTO transactions (user_id, type, amount, status) VALUES ($1, $2, $3, $4)',
-      [req.user.userId, 'withdraw', amount, 'confirmed']
-    );
+      // Mettre à jour le solde
+      const updatedUser = await pool.query(
+        'UPDATE users SET balance_trx = balance_trx - $1 WHERE id = $2 RETURNING balance_trx',
+        [totalNeeded, req.user.userId]
+      );
 
-    await pool.query('COMMIT');
+      // Enregistrer la transaction
+      await pool.query(
+        'INSERT INTO transactions (user_id, type, amount, trx_amount, tron_address, transaction_hash, status) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [req.user.userId, 'withdraw', amount, amount, address, result.txid, 'confirmed']
+      );
 
-    res.json({
-      message: 'Retrait effectué avec succès',
-      newBalance: updatedUser.rows[0].balance_points
-    });
+      await pool.query('COMMIT');
+
+      res.json({
+        success: true,
+        message: 'Retrait effectué avec succès',
+        txid: result.txid,
+        amount: amount,
+        fee: estimatedFee,
+        newBalance: updatedUser.rows[0].balance_trx
+      });
+    } catch (txError) {
+      await pool.query('ROLLBACK');
+      console.error('Erreur transaction TRX:', txError);
+      res.status(500).json({ error: 'Erreur lors de l\'envoi de la transaction' });
+    }
   } catch (error) {
     await pool.query('ROLLBACK');
     console.error('Erreur lors du retrait:', error);
@@ -266,7 +349,7 @@ io.on('connection', (socket) => {
       const decoded = jwt.verify(token, JWT_SECRET);
       
       const user = await pool.query(
-        'SELECT id, username, balance_points FROM users WHERE id = $1',
+        'SELECT id, username, balance_trx FROM users WHERE id = $1',
         [decoded.userId]
       );
 
@@ -277,8 +360,8 @@ io.on('connection', (socket) => {
 
       const userData = user.rows[0];
       
-      if (userData.balance_points < 2) {
-        socket.emit('error', { message: 'Solde insuffisant (minimum 2 points)' });
+      if (userData.balance_trx < 2) {
+        socket.emit('error', { message: 'Solde insuffisant (minimum 2 TRX)' });
         return;
       }
 
@@ -294,7 +377,7 @@ io.on('connection', (socket) => {
         userId: userData.id,
         username: userData.username,
         socketId: socket.id,
-        balance: userData.balance_points
+        balance: userData.balance_trx
       };
 
       socket.userId = userData.id;
@@ -378,12 +461,12 @@ async function startGame(player1, player2) {
     await pool.query('BEGIN');
 
     await pool.query(
-      'UPDATE users SET balance_points = balance_points - $1 WHERE id = $2',
+      'UPDATE users SET balance_trx = balance_trx - $1 WHERE id = $2',
       [stake, player1.userId]
     );
 
     await pool.query(
-      'UPDATE users SET balance_points = balance_points - $1 WHERE id = $2',
+      'UPDATE users SET balance_trx = balance_trx - $1 WHERE id = $2',
       [stake, player2.userId]
     );
 
@@ -459,7 +542,7 @@ async function endGame(game, winner, loser) {
 
     // Payer le gagnant
     await pool.query(
-      'UPDATE users SET balance_points = balance_points + $1, wins = wins + 1 WHERE id = $2',
+      'UPDATE users SET balance_trx = balance_trx + $1, wins = wins + 1 WHERE id = $2',
       [winnerPayout, winner.userId]
     );
 
