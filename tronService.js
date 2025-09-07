@@ -1,4 +1,4 @@
-const TronWeb = require('tronweb');
+const { TronWeb } = require('tronweb');
 const crypto = require('crypto');
 
 class TronService {

@@ -89,7 +89,7 @@ function setupEventListeners() {
     
     // Profil
     document.getElementById('back-to-home').addEventListener('click', () => showPage('home'));
-    document.getElementById('deposit-btn').addEventListener('click', handleDeposit);
+    document.getElementById('check-deposits-btn').addEventListener('click', checkDeposits);
     document.getElementById('withdraw-btn').addEventListener('click', handleWithdraw);
     
     // Jeu
@@ -133,7 +133,7 @@ function updateNavigation() {
         playBtn.classList.remove('hidden');
         
         document.getElementById('user-username').textContent = currentUser.username;
-        document.getElementById('user-balance').textContent = currentUser.balance_points || 0;
+        document.getElementById('user-balance').textContent = currentUser.balance_trx || 0;
     } else {
         userNav.classList.add('hidden');
         guestNav.classList.remove('hidden');
@@ -247,9 +247,12 @@ async function loadProfile() {
         await loadUserData();
         
         // Mettre à jour les éléments du profil
-        document.getElementById('profile-balance').textContent = currentUser.balance_points || 0;
+        document.getElementById('profile-balance').textContent = currentUser.balance_trx || 0;
         document.getElementById('profile-wins').textContent = currentUser.wins || 0;
         document.getElementById('profile-losses').textContent = currentUser.losses || 0;
+        
+        // Charger l'adresse de dépôt
+        await loadDepositAddress();
         
         // Charger l'historique des transactions
         const response = await fetch('/api/transactions', {
@@ -301,7 +304,7 @@ function displayTransactions(transactions) {
             </div>
             <div class="text-right">
                 <div class="font-bold ${transaction.amount > 0 ? 'text-green-600' : 'text-red-600'}">
-                    ${transaction.amount > 0 ? '+' : ''}${transaction.amount} points
+                    ${transaction.amount > 0 ? '+' : ''}${transaction.trx_amount || transaction.amount} TRX
                 </div>
                 <div class="text-xs text-gray-500">
                     ${new Date(transaction.created_at).toLocaleDateString()}
@@ -313,43 +316,77 @@ function displayTransactions(transactions) {
     });
 }
 
-async function handleDeposit() {
-    const amount = parseFloat(document.getElementById('deposit-amount').value);
-    
-    if (!amount || amount < 10) {
-        showNotification('Montant minimum: 10 points', 'error');
-        return;
-    }
-    
+async function loadDepositAddress() {
     try {
-        const response = await fetch('/api/wallet/deposit', {
-            method: 'POST',
+        const response = await fetch('/api/wallet/deposit-address', {
             headers: {
-                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ amount })
+            }
         });
         
         const data = await response.json();
         
         if (response.ok) {
-            showNotification('Dépôt effectué avec succès !', 'success');
-            document.getElementById('deposit-amount').value = '';
-            loadProfile();
+            document.getElementById('deposit-address').textContent = data.address;
+        } else {
+            showNotification('Erreur lors du chargement de l\'adresse', 'error');
+        }
+    } catch (error) {
+        showNotification('Erreur lors du chargement de l\'adresse', 'error');
+    }
+}
+
+async function checkDeposits() {
+    try {
+        const button = document.getElementById('check-deposits-btn');
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Vérification...';
+        
+        const response = await fetch('/api/wallet/check-deposits', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            if (data.success) {
+                showNotification(data.message, 'success');
+                loadProfile();
+            } else {
+                showNotification(data.message, 'info');
+            }
         } else {
             showNotification(data.error, 'error');
         }
     } catch (error) {
-        showNotification('Erreur lors du dépôt', 'error');
+        showNotification('Erreur lors de la vérification', 'error');
+    } finally {
+        const button = document.getElementById('check-deposits-btn');
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-sync mr-2"></i>Vérifier les dépôts';
     }
 }
 
 async function handleWithdraw() {
     const amount = parseFloat(document.getElementById('withdraw-amount').value);
+    const address = document.getElementById('withdraw-address').value.trim();
     
-    if (!amount || amount < 50) {
-        showNotification('Montant minimum: 50 points', 'error');
+    if (!amount || amount < 5) {
+        showNotification('Montant minimum: 5 TRX', 'error');
+        return;
+    }
+    
+    if (!address) {
+        showNotification('Veuillez saisir une adresse TRX', 'error');
+        return;
+    }
+    
+    // Confirmation de retrait
+    if (!confirm(`Confirmer le retrait de ${amount} TRX vers ${address} ?\nFrais estimés: ~1.1 TRX`)) {
         return;
     }
     
@@ -360,14 +397,15 @@ async function handleWithdraw() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${authToken}`
             },
-            body: JSON.stringify({ amount })
+            body: JSON.stringify({ amount, address })
         });
         
         const data = await response.json();
         
         if (response.ok) {
-            showNotification('Retrait effectué avec succès !', 'success');
+            showNotification(`Retrait effectué ! TXID: ${data.txid}`, 'success');
             document.getElementById('withdraw-amount').value = '';
+            document.getElementById('withdraw-address').value = '';
             loadProfile();
         } else {
             showNotification(data.error, 'error');
@@ -383,8 +421,8 @@ function startMatchmaking() {
         return;
     }
     
-    if (!currentUser || currentUser.balance_points < 2) {
-        showNotification('Solde insuffisant (minimum 2 points)', 'error');
+    if (!currentUser || currentUser.balance_trx < 2) {
+        showNotification('Solde insuffisant (minimum 2 TRX)', 'error');
         return;
     }
     
@@ -485,6 +523,29 @@ function showGameResult(data) {
     }
     
     currentGame = null;
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            showNotification('Adresse copiée !', 'success');
+        }).catch(() => {
+            showNotification('Erreur lors de la copie', 'error');
+        });
+    } else {
+        // Fallback pour les navigateurs plus anciens
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            showNotification('Adresse copiée !', 'success');
+        } catch (err) {
+            showNotification('Erreur lors de la copie', 'error');
+        }
+        document.body.removeChild(textArea);
+    }
 }
 
 function showNotification(message, type) {
