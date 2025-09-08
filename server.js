@@ -20,7 +20,7 @@ const io = socketIo(server, {
 
 // Configuration de la base de données
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/progress_race',
+  connectionString: process.env.DATABASE_URL || 'postgresql://progess_user:MFThgJICXcACawno7UyFYSmHcBlVHbaF@dpg-d2vac77fte5s73btbq00-a.oregon-postgres.render.com/progress_race',
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 // Test de connexion à la base de données
