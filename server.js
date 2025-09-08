@@ -20,9 +20,21 @@ const io = socketIo(server, {
 
 // Configuration de la base de données
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/progress_race',
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+// Test de connexion à la base de données
+pool.connect()
+  .then(client => {
+    console.log('✅ Connexion à la base de données réussie');
+    client.release();
+  })
+  .catch(err => {
+    console.error('❌ Erreur connexion base de données:', err.message);
+    console.error('DATABASE_URL:', process.env.DATABASE_URL ? 'configuré' : 'NON CONFIGURÉ');
+  });
+// Middleware - Configuration pour Render
+app.set('trust proxy', 1); // 1 = faire confiance au premier proxy (Render)
 
 // Middleware
 app.set('trust proxy', true); // Fix pour express-rate-limit
